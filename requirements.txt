@@ -1,0 +1,8 @@
+torch
+torchvision
+numpy
+pyyaml
+easydict
+einops
+matplotlib
+scikit-learn
