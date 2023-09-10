@@ -58,11 +58,11 @@ class SeqAELSTSQ(nn.Module):
 
         # ==Esitmate dynamics==
         fn = self.dynamics_model(H)
-        H_pred = fn(H)
-        H_diff1 = H - H_pred
-        H_diff2 = H.flip(dims=[1]) - H_pred
+        H_pred = torch.stack([H[:,0], fn(H)], dim=1)
+        H_diff = H_pred[:,0] - H_pred[:, 1]
         
         # Prediction in the observation space
         x_preds = self.decode(H_pred)
-        x_diff = xs - x_preds
-        return x_preds, x_diff, H_diff1, H_diff2, logits
+        x_diff = xs[:,0] - x_preds[:, 0]
+        logits = logits[:, 0]
+        return x_preds, x_diff, H_diff, logits

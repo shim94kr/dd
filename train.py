@@ -15,19 +15,19 @@ from configs.config import config, update_config
 from models.eval_networks import get_eval_pool, get_network
 from eval import eval_synthetic_set
 from utils import exp_utils, train_utils, data_utils
+from models.ema import ImageEMA
 
 
 logger = logging.getLogger(__name__)
 
 def compute_loss(sample, label, model, losses):
-    sample_pred, sample_diff, H_diff1, H_diff2, logits = model(sample)
-    losses['recon'] = torch.mean(sample_diff[:, 1] ** 2)
-    losses['recon_H'] = torch.mean(H_diff1[:, 1] ** 2 + H_diff2[:, 1] ** 2)
+    sample_pred, sample_diff, H_diff, logits = model(sample)
+    losses['recon'] = torch.mean(sample_diff ** 2)
+    losses['recon_H'] = torch.mean(H_diff ** 2)
     #losses['recon'] = torch.mean(torch.sum(sample_diff[:, 1] ** 2, [1, 2, 3]))
     #losses['recon_H'] = torch.mean(torch.sum(H_diff[:, 1] ** 2, [1, 2]))
     
     criterion = nn.CrossEntropyLoss()
-    logits = logits[:,0]
     #logits = logits.flatten(0, 1)     
     #label = torch.cat([label, label], 0)
     losses['cls'] = criterion(logits, label)
@@ -55,7 +55,7 @@ def train_epoch(config, loader, dataset, image_syn, model, optimizer, epoch, out
         rand_idx = torch.randint(0, ipc, (batch_size, ))
 
         sample_real, label = batch[0].to(device), batch[1].to(device)
-        sample_syn = image_syn[label, rand_idx]
+        sample_syn = image_syn.val[label, rand_idx]
         sample = torch.stack([sample_real, sample_syn], dim=1)
 
         time_meters.add_loss_value('Data time', time.time() - batch_end)
@@ -64,6 +64,7 @@ def train_epoch(config, loader, dataset, image_syn, model, optimizer, epoch, out
         # compute reconstruction & classification loss
         losses = {}
         out_real, out_syn = compute_loss(sample, label, model, losses)
+        image_syn.update(out_syn.detach(), label, rand_idx)
         time_meters.add_loss_value('Reconstruction time', time.time() - end)
         end = time.time()
 
@@ -151,9 +152,9 @@ def main():
     num_channel = config.dataset.num_channel
     num_classes = config.dataset.num_classes
     model = exp_utils.load_component(config.model, config).to(device)
-    image_syn = nn.Parameter(torch.randn(size=(num_classes, ipc, num_channel, img_size, img_size), dtype=torch.float, device=device))
+    image_syn = ImageEMA(num_classes, ipc, num_channel, img_size, device)
     label_syn = torch.tensor([np.ones(ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=device)
-    param = list(model.parameters()) + [image_syn]
+    param = list(model.parameters()) #+ [image_syn]
 
     # get model for evaluation
     eval_model_pool = get_eval_pool(config.eval.mode)
@@ -192,7 +193,7 @@ def main():
 
             for i in range(num_classes):
                 for j in range(ipc):
-                    _img = image_syn[i][j].permute(1, 2, 0)
+                    _img = image_syn.val[i][j].permute(1, 2, 0)
                     _img = (_img * img_std + img_mean).clamp(0, 1)
                     if num_channel == 1:
                         _img = _img.tile(1, 1, 3)
@@ -203,8 +204,7 @@ def main():
             
         # Quantitative validataion of image_syn
         time_meters = exp_utils.AverageMeters()
-        eval_image_syn = copy.deepcopy(image_syn.detach())
-        eval_data = data_utils.TensorDataset(image_syn, label_syn)
+        eval_data = data_utils.TensorDataset(image_syn.val, label_syn)
         eval_loader = torch.utils.data.DataLoader(eval_data, batch_size=config.eval.batch_size, shuffle=True, num_workers=0)
 
         config.dataset.split = 'test'
