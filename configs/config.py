@@ -33,6 +33,12 @@ config.augment.crop = 4
 config.augment.rotate = 45
 config.augment.noise = 0.001
 
+# pretrain config
+config.pretrain = edict()
+config.pretrain.encoders = []#['MLP']
+config.pretrain.batch_size = [256]
+config.pretrain.lr = [0.01]
+config.pretrain.epoch = [100]
 
 # model config
 config.model = edict()
@@ -40,7 +46,6 @@ config.model.fn = './models/seqae.py'
 config.model.name = 'SeqAELSTSQ'
 config.model.dim_m = 256
 config.model.dim_a = 16
-config.model.ch_x = 1
 config.model.k = 2.
 config.model.predictive = True
 config.model.alignment = False

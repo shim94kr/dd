@@ -1,0 +1,18 @@
+exp_name: 'inv_dd_sample_diff'
+output_dir: './output/'
+
+# dataset config
+dataset:
+  fn: './datasets/cifar10.py'
+  name: 'CIFAR10'
+  mean: [0.4914, 0.4822, 0.4465]
+  std: [0.2470, 0.2435, 0.2616]
+  num_classes: 10
+  num_channel: 3
+
+model:
+  dim_m: 256
+  dim_a: 16
+
+train:
+  adjust_iter_num: [40000]

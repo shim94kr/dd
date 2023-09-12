@@ -14,26 +14,28 @@ import matplotlib.pyplot as plt
 from configs.config import config, update_config
 from models.eval_networks import get_eval_pool, get_network
 from eval import eval_synthetic_set
-from utils import exp_utils, train_utils, data_utils
+from utils import exp_utils, train_utils, data_utils, loss_utils
 from models.ema import ImageEMA
-
+from pretrain import pretrain_encoder
+from models.base_networks import ResNetEncoder, Conv1d1x1Encoder
 
 logger = logging.getLogger(__name__)
 
-def compute_loss(sample, label, model, losses):
-    sample_pred, sample_diff, H_diff, logits = model(sample)
+def compute_loss(sample, label, model, losses, rand_idx, perceptual_loss):
+    sample_pred, sample_diff, H_diff, logits = model(sample, rand_idx)
     losses['recon'] = torch.mean(sample_diff ** 2)
     losses['recon_H'] = torch.mean(H_diff ** 2)
-    #losses['recon'] = torch.mean(torch.sum(sample_diff[:, 1] ** 2, [1, 2, 3]))
-    #losses['recon_H'] = torch.mean(torch.sum(H_diff[:, 1] ** 2, [1, 2]))
+    #losses['recon'] = torch.mean(torch.sum(sample_diff ** 2, [1, 2, 3]))
+    #losses['recon_H'] = torch.mean(torch.sum(H_diff ** 2, [1, 2]))
+    classifier_criterion = nn.CrossEntropyLoss()
     
-    criterion = nn.CrossEntropyLoss()
     #logits = logits.flatten(0, 1)     
     #label = torch.cat([label, label], 0)
-    losses['cls'] = criterion(logits, label)
+    #losses['perception'] = perceptual_loss(sample_pred[:,0], sample_pred[:,1])
+    losses['cls'] = classifier_criterion(logits, label)
     return sample_pred[:,0], sample_pred[:,1]
 
-def train_epoch(config, loader, dataset, image_syn, model, optimizer, epoch, output_dir, device, rank):
+def train_epoch(config, loader, dataset, image_syn, model, perceptual_loss, optimizer, epoch, output_dir, device, rank):
     time_meters = exp_utils.AverageMeters()
     loss_meters = exp_utils.AverageMeters()
 
@@ -41,8 +43,8 @@ def train_epoch(config, loader, dataset, image_syn, model, optimizer, epoch, out
 
     batch_end = time.time()
     batch_size = config.train.batch_size
-    img_mean = torch.tensor(config.dataset.mean).to(device)
-    img_std = torch.tensor(config.dataset.std).to(device)
+    img_mean = torch.tensor(config.dataset.mean).reshape(1, 1, -1).to(device)
+    img_std = torch.tensor(config.dataset.std).reshape(1, 1, -1).to(device)
     for batch_idx, batch in enumerate(loader):
         # adjust lr
         iter_num = batch_idx + len(loader) * epoch
@@ -52,7 +54,7 @@ def train_epoch(config, loader, dataset, image_syn, model, optimizer, epoch, out
         # sampling synthetic sample
         ipc = config.dataset.ipc
         batch_size = config.train.batch_size
-        rand_idx = torch.randint(0, ipc, (batch_size, ))
+        rand_idx = torch.randint(0, ipc, (1,)).item()
 
         sample_real, label = batch[0].to(device), batch[1].to(device)
         sample_syn = image_syn.val[label, rand_idx]
@@ -63,12 +65,12 @@ def train_epoch(config, loader, dataset, image_syn, model, optimizer, epoch, out
 
         # compute reconstruction & classification loss
         losses = {}
-        out_real, out_syn = compute_loss(sample, label, model, losses)
+        out_real, out_syn = compute_loss(sample, label, model, losses, rand_idx, perceptual_loss)
         image_syn.update(out_syn.detach(), label, rand_idx)
         time_meters.add_loss_value('Reconstruction time', time.time() - end)
         end = time.time()
 
-        total_loss = losses['recon'] + losses['recon_H'] + losses['cls']
+        total_loss = losses['recon'] + losses['cls'] + losses['recon_H'] #+ losses['perception'] 
         total_loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -144,23 +146,43 @@ def main():
                                                drop_last=True,
                                                sampler=train_sampler)
 
-    # get model for training
+    config.dataset.split = 'test'
+    test_data = exp_utils.load_component(config.dataset, config)
+    test_loader = torch.utils.data.DataLoader(test_data, batch_size=config.eval.batch_size, shuffle=True, num_workers=0)
+
+    # get basic config for model definition
     ipc = config.dataset.ipc
     img_size = config.dataset.img_size
-    img_mean = torch.tensor(config.dataset.mean).to(device)
-    img_std = torch.tensor(config.dataset.std).to(device)
+    img_mean = torch.tensor(config.dataset.mean).reshape(1, 1, -1).to(device)
+    img_std = torch.tensor(config.dataset.std).reshape(1, 1, -1).to(device)
     num_channel = config.dataset.num_channel
     num_classes = config.dataset.num_classes
-    model = exp_utils.load_component(config.model, config).to(device)
+
+    # get model for encoder
+    encoders = [ResNetEncoder(num_classes, config.model.k, n_blocks=3).to(device)]
+    #encoders = []
+    for idx, encoder in enumerate(config.pretrain.encoders):
+        ckpt_name = f"{config.dataset.name}_{encoder}.pth.tar"
+        encoder = get_network(encoder, num_classes, num_channel, (img_size, img_size), device, use_ddp, args.local_rank)
+        if os.path.exists("checkpoints/"+ ckpt_name):
+            train_utils.load_checkpoint(encoder, "./checkpoints", ckpt_name=ckpt_name, device=device, use_ddp=use_ddp)
+        else:
+            _, model_state = pretrain_encoder(config, idx, encoder, train_loader, test_loader, device)
+            train_utils.save_checkpoint(model_state, "./checkpoints", ckpt_name=ckpt_name)
+
+        encoders.append(encoder)
+    
+    model = exp_utils.load_component(config.model, config, encoders = encoders).to(device)
     image_syn = ImageEMA(num_classes, ipc, num_channel, img_size, device)
     label_syn = torch.tensor([np.ones(ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=device)
-    param = list(model.parameters()) #+ [image_syn]
 
     # get model for evaluation
     eval_model_pool = get_eval_pool(config.eval.mode)
+    params = list(model.parameters()) + list(encoders[0].parameters()) 
 
     # get optimizer
-    optimizer = torch.optim.Adam(param, lr=config.train.lr)
+    optimizer = torch.optim.Adam(params, lr=config.train.lr)
+    perceptual_loss = loss_utils.VGGPerceptualLoss().to(device)
     if use_ddp:
         model =  torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
         device_ids = range(torch.cuda.device_count())
@@ -180,9 +202,10 @@ def main():
                     dataset=train_data, 
                     image_syn=image_syn,
                     model=model, 
+                    perceptual_loss = perceptual_loss,
                     optimizer=optimizer,
                     epoch=epoch, 
-                    output_dir=output_dir, 
+                    output_dir=output_dir,
                     device=device,
                     rank=args.local_rank)
         
@@ -207,10 +230,6 @@ def main():
         eval_data = data_utils.TensorDataset(image_syn.val, label_syn)
         eval_loader = torch.utils.data.DataLoader(eval_data, batch_size=config.eval.batch_size, shuffle=True, num_workers=0)
 
-        config.dataset.split = 'test'
-        test_data = exp_utils.load_component(config.dataset, config)
-        test_loader = torch.utils.data.DataLoader(test_data, batch_size=config.eval.batch_size, shuffle=True, num_workers=0)
-
         train_end = time.time()
         for eval_model in eval_model_pool:
             accs = []
@@ -228,9 +247,6 @@ def main():
             eval_time = time_meters.average_meters['Eval time'].val,
         )
         logger.info(msg)
-                
-
-        
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Dataset Distillation with Invariant Constraint')

@@ -38,9 +38,9 @@ def load_module(fn, name):
     sys.path.insert(0, mod_path)
     return getattr(__import__(mod_name), name)
 
-def load_component(config, config_all):
+def load_component(config, config_all, **kwargs):
     class_fn = load_module(config.fn, config.name)
-    return class_fn(config_all)
+    return class_fn(config_all, **kwargs)
 
 def create_logger(cfg, cfg_name, phase='train'):
     this_dir = Path(os.path.dirname(__file__))

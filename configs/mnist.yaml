@@ -1,11 +1,15 @@
 
-exp_name: 'inv_dd_shuffle2_only_syn'
+exp_name: 'inv_dd_pretrained'
 output_dir: './output/'
 
 # dataset config
 dataset:
   fn: './datasets/mnist.py'
   name: 'MNIST'
-
+  mean: [0.1307]
+  std: [0.3081]
+  num_classes: 10
+  num_channel: 1
+  
 train:
   adjust_iter_num: [40000]

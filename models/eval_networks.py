@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 def get_eval_pool(eval_mode):
     if eval_mode == 'A': # basic architecture
         model_eval_pool = ['MLP']
@@ -44,6 +45,15 @@ class MLP(nn.Module):
         self.fc_1 = nn.Linear(32*32*1 if channel==1 else 32*32*3, 128)
         self.fc_2 = nn.Linear(128, 128)
         self.fc_3 = nn.Linear(128, num_classes)
+    
+    def embed(self, x):
+        out = x.view(x.size(0), -1)
+        out = F.relu(self.fc_1(out))
+        out = F.relu(self.fc_2(out))
+        return out
+    
+    def get_logits(self, x):
+        return self.fc_3(x)
 
     def forward(self, x):
         out = x.view(x.size(0), -1)
@@ -73,6 +83,9 @@ class ConvNet(nn.Module):
         out = self.features(x)
         out = out.view(out.size(0), -1)
         return out
+
+    def get_logits(self, x):
+        return self.classifier(x)
 
     def _get_activation(self, net_act):
         if net_act == 'sigmoid':
@@ -148,6 +161,16 @@ class LeNet(nn.Module):
         self.fc_1 = nn.Linear(16 * 6 * 6, 120)
         self.fc_2 = nn.Linear(120, 84)
         self.fc_3 = nn.Linear(84, num_classes)
+
+    def embed(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.fc_1(x))
+        x = F.relu(self.fc_2(x))
+        return x
+
+    def get_logits(self, x):
+        return self.fc_3(x)
 
     def forward(self, x):
         x = self.features(x)

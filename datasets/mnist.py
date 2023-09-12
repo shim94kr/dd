@@ -12,7 +12,7 @@ class MNIST(MNIST_torch):
         mean = config.dataset.mean
         std = config.dataset.std
         transform = transforms.Compose([transforms.ToTensor(), 
-                                        transforms.Resize((32, 32)),
+                                        transforms.Resize((32, 32), antialias = True),
                                         transforms.Normalize(mean=mean, std=std)])
 
         if split == "train":

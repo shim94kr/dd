@@ -24,7 +24,7 @@ class Conv1d1x1Encoder(nn.Sequential):
 
 class ResNetEncoder(nn.Module):
     def __init__(self,
-                 dim_latent=1024,
+                 num_classes,
                  k=1,
                  act=nn.ReLU(),
                  kernel_size=3,
@@ -40,14 +40,23 @@ class ResNetEncoder(nn.Module):
                     resample='down', activation=act, kernel_size=kernel_size) for i in range(n_blocks)],
             nn.GroupNorm(min(32, chs[n_blocks]), chs[n_blocks]),
             act)
-        self.linear = nn.LazyLinear(
-            dim_latent) if dim_latent > 0 else lambda x: x
+
+        self.linear_cls = nn.LazyLinear(num_classes)
+
+    def embed (self, x):
+        h = x
+        h = self.phi(h)
+        h = h.mean(dim=[-1, -2])
+        return h
+
+    def get_logits(self, x):
+        return self.linear_cls(x)
 
     def __call__(self, x):
         h = x
         h = self.phi(h)
         h = h.reshape(h.shape[0], -1)
-        h = self.linear(h)
+        h = self.linear_cls(h)
         return h
 
 
@@ -72,5 +81,4 @@ class ResNetDecoder(nn.Module):
         x = repeat(x, 'n c -> n c h w',
                    h=self.bottom_width, w=self.bottom_width)
         x = self.net(x)
-        x = torch.sigmoid(x)
         return x

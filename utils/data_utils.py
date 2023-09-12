@@ -18,7 +18,6 @@ class TensorDataset(Dataset):
         return self.images.shape[0]
 
 
-
 def augment(config, images, device):
     # This can be sped up in the future.
 
