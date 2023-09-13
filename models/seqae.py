@@ -38,18 +38,15 @@ class SeqAELSTSQ(nn.Module):
             H, (shape[0], shape[1], *H.shape[1:]))
 
         logits = enc.get_logits(H)
-        inv_H = linear(H)
-        inv_H = torch.reshape(
-            inv_H, (inv_H.shape[0], inv_H.shape[1], self.dim_m, self.dim_a))
         
-        return inv_H, logits
+        return H, logits
 
     def decode(self, H):
         if hasattr(self, "change_of_basis"):
             H = H @ repeat(torch.linalg.inv(self.change_of_basis),
                            'a1 a2 -> n t a1 a2', n=H.shape[0], t=H.shape[1])
         n, t = H.shape[:2]
-        H = rearrange(H, 'n t d_s d_a -> (n t) (d_s d_a)')
+        H = rearrange(H, 'n t d_s -> (n t) d_s')
         x_next_preds = self.dec(H)
         x_next_preds = torch.reshape(
             x_next_preds, (n, t, *x_next_preds.shape[1:]))
@@ -60,12 +57,19 @@ class SeqAELSTSQ(nn.Module):
         H, logits = self.encode(xs, rand_idx)
 
         # ==Esitmate dynamics==
-        fn = self.dynamics_model(H)
-        H_pred = torch.stack([H[:,0], fn(H)], dim=1)
-        H_diff = H_pred[:,0] - H_pred[:,1]
-        
+        permute_logits = torch.randperm(H.shape[0])
+        permute_H = torch.randperm(H.shape[0])
+        logits_diff = logits[:, 0] - logits[:, 1]
+        H_diff = H[:, 0] - H[:, 1]
+        #H_diff = H_diff.roll(shifts=(1,), dims=(0,))
+        H_preds = torch.stack([H[:, 0], H[:,0] + H_diff[permute_H], H[:, 1]], dim=1)
+        #M_star = self.dynamics_model(H)
+        #permute = torch.randperm(M_star.shape[0])
+        #M_diff = M_star - torch.eye(self.dim_a).reshape(1, self.dim_a, self.dim_a).to(M_star.device)
+        #H_preds = torch.stack([H[:, 0], H[:, 1] @ M_star[permute], H[:, 1]], dim=1)
+
         # Prediction in the observation space
-        x_preds = self.decode(H_pred)
-        x_diff = xs[:,0] - x_preds[:, 0]
-        logits = logits[:, 0]
+        x_preds = self.decode(H_preds)
+        x_diff = xs[:, 0:1] - x_preds[:, 0:2]
+        logits = torch.stack([logits[:,0], logits[:,0] + logits_diff[permute_logits]])
         return x_preds, x_diff, H_diff, logits

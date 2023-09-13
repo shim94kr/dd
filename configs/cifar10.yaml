@@ -1,4 +1,4 @@
-exp_name: 'inv_dd_sample_diff'
+exp_name: 'inv_dd_rev_logit_h_permute_largebatch'
 output_dir: './output/'
 
 # dataset config
@@ -11,8 +11,8 @@ dataset:
   num_channel: 3
 
 model:
-  dim_m: 256
-  dim_a: 16
+  dim_m: 128
+  dim_a: 4
 
 train:
   adjust_iter_num: [40000]

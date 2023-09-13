@@ -34,15 +34,6 @@ def loss_orth(M_star):
 
 
 class LinearTensorDynamicsLSTSQ(nn.Module):
-    class DynFn(nn.Module):
-        def __init__(self, M):
-            super().__init__()
-            self.permute = torch.randperm(M.shape[0])
-            self.M = M[self.permute]
-
-        def __call__(self, H):
-            H0, H1 = H[:, 0], H[:, 1]
-            return H0 @ self.M
 
     def __init__(self, alignment=True):
         super().__init__()
@@ -55,11 +46,10 @@ class LinearTensorDynamicsLSTSQ(nn.Module):
         # Batch x dim_m x dim_a
         # The difference between the the time shifted components
         loss_internal_0 = _loss(H0, H1)
-        M_star = _solve(H0, H1)
-        dyn_fn = self.DynFn(M_star)
+        M_star = _solve(H1, H0)
         loss_internal_T = _loss(H0 @ M_star, H1)
-        losses = (loss_bd(dyn_fn.M, self.alignment),
-                    loss_orth(dyn_fn.M), loss_internal_T)
+        losses = (loss_bd(M_star, self.alignment),
+                    loss_orth(M_star), loss_internal_T)
         
         # M_star is returned in the form of module, not the matrix
-        return dyn_fn
+        return M_star

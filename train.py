@@ -15,25 +15,25 @@ from configs.config import config, update_config
 from models.eval_networks import get_eval_pool, get_network
 from eval import eval_synthetic_set
 from utils import exp_utils, train_utils, data_utils, loss_utils
-from models.ema import ImageEMA
+from models.ema import ImageEMA, ModelEMA
 from pretrain import pretrain_encoder
 from models.base_networks import ResNetEncoder, Conv1d1x1Encoder
 
 logger = logging.getLogger(__name__)
 
 def compute_loss(sample, label, model, losses, rand_idx, perceptual_loss):
-    sample_pred, sample_diff, H_diff, logits = model(sample, rand_idx)
+    sample_pred, sample_diff, M_diff, logits = model(sample, rand_idx)
     losses['recon'] = torch.mean(sample_diff ** 2)
-    losses['recon_H'] = torch.mean(H_diff ** 2)
+    losses['recon_M'] = torch.mean(M_diff ** 2)
     #losses['recon'] = torch.mean(torch.sum(sample_diff ** 2, [1, 2, 3]))
     #losses['recon_H'] = torch.mean(torch.sum(H_diff ** 2, [1, 2]))
     classifier_criterion = nn.CrossEntropyLoss()
     
-    #logits = logits.flatten(0, 1)     
-    #label = torch.cat([label, label], 0)
+    logits = logits.flatten(0, 1)     
+    label = torch.cat([label, label], 0)
     #losses['perception'] = perceptual_loss(sample_pred[:,0], sample_pred[:,1])
     losses['cls'] = classifier_criterion(logits, label)
-    return sample_pred[:,0], sample_pred[:,1]
+    return sample_pred[:,0], sample_pred[:,1], sample_pred[:,2]
 
 def train_epoch(config, loader, dataset, image_syn, model, perceptual_loss, optimizer, epoch, output_dir, device, rank):
     time_meters = exp_utils.AverageMeters()
@@ -65,12 +65,12 @@ def train_epoch(config, loader, dataset, image_syn, model, perceptual_loss, opti
 
         # compute reconstruction & classification loss
         losses = {}
-        out_real, out_syn = compute_loss(sample, label, model, losses, rand_idx, perceptual_loss)
+        out_real, out_real2, out_syn = compute_loss(sample, label, model, losses, rand_idx, perceptual_loss)
         image_syn.update(out_syn.detach(), label, rand_idx)
         time_meters.add_loss_value('Reconstruction time', time.time() - end)
         end = time.time()
 
-        total_loss = losses['recon'] + losses['cls'] + losses['recon_H'] #+ losses['perception'] 
+        total_loss = losses['recon']  + losses['recon_M'] + losses['cls']#+ losses['perception'] 
         total_loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -97,15 +97,15 @@ def train_epoch(config, loader, dataset, image_syn, model, perceptual_loss, opti
 
             logger.info(msg)
             if config.vis_recon:
-                outs = [sample_real, sample_syn, out_real, out_syn]
-                fig, axes = plt.subplots(4, batch_size, figsize=(5, 5))
+                outs = [sample_real, sample_syn, out_real, out_real2, out_syn]
+                fig, axes = plt.subplots(5, 32, figsize=(5, 5))
                 axes = axes.ravel()
                 for i, out in enumerate(outs):
-                    for j in range(batch_size):
+                    for j in range(32):
                         _img = out[j].permute(1, 2, 0)
                         _img = (_img * img_std + img_mean).clamp(0, 1)
-                        axes[i * batch_size + j].imshow(_img.detach().cpu().numpy())
-                        axes[i * batch_size + j].axis('off')
+                        axes[i * 32 + j].imshow(_img.detach().cpu().numpy())
+                        axes[i * 32 + j].axis('off')
 
                 plt.savefig(output_dir+f'/out_{epoch}.png')
 

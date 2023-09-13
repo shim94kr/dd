@@ -68,9 +68,12 @@ class ResNetDecoder(nn.Module):
 
         self.bottom_width = bottom_width
         self.linear = nn.LazyLinear(chs[n_blocks])
-        self.net = nn.Sequential(
-            *[Block(chs[i+1], chs[i], chs[i],
-                    resample='up', activation=act, kernel_size=kernel_size) for i in range(n_blocks-1, -1, -1)],
+        self.net = nn.ModuleList(nn.Sequential(
+            Block(chs[i+1], chs[i], chs[i],
+                    resample='up', activation=act, kernel_size=kernel_size)) for i in range(n_blocks-1, -1, -1)
+        )
+
+        self.net_last = nn.Sequential(
             nn.GroupNorm(min(32, chs[0]), chs[0]),
             act,
             nn.Conv2d(chs[0], ch_x, 3, 1, 1)
@@ -80,5 +83,9 @@ class ResNetDecoder(nn.Module):
         x = self.linear(x)
         x = repeat(x, 'n c -> n c h w',
                    h=self.bottom_width, w=self.bottom_width)
-        x = self.net(x)
+
+        for i in range(len(self.net)):
+            x = self.net[i](x)
+
+        x = self.net_last(x)
         return x

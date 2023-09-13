@@ -1,5 +1,5 @@
 
-exp_name: 'inv_dd_pretrained'
+exp_name: 'inv_dd_rev_noInvH'
 output_dir: './output/'
 
 # dataset config
