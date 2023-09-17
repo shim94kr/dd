@@ -15,29 +15,24 @@ from configs.config import config, update_config
 from models.eval_networks import get_eval_pool, get_network
 from eval import eval_synthetic_set
 from utils import exp_utils, train_utils, data_utils, loss_utils
-from models.ema import ImageEMA, ModelEMA
+from models.ema import Feat1DEMA, ImageEMA, ModelEMA
 from pretrain import pretrain_encoder
 from models.base_networks import ResNetEncoder, Conv1d1x1Encoder
 
 logger = logging.getLogger(__name__)
 
-def compute_loss(sample_real, sample_syn, label, model, model_ema, losses, rand_idx, perceptual_loss):
-    feat_real, H_real, logits = model.encode(sample_real, rand_idx)
-    feat_syn, H_syn, _ = model_ema.encode(sample_syn, rand_idx)
+def compute_loss(sample_real, feat_syn, label, model, model_ema, losses, rand_idx, perceptual_loss):
+    H_real, logits = model.encode(sample_real, feat_syn, rand_idx)
+    H_syn = feat_syn[label]
 
     H_diff = H_real - H_syn
     permute = torch.randperm(H_diff.shape[0])
     H_real_ = H_real + H_diff[permute]
 
     Hs = torch.stack([H_real, H_real_, H_syn], dim=1)
-    sample_pred = model.decode(Hs, feat_real)
-    #H_preds_real = H_real.unsqueeze(1) #torch.stack([H_real, H_real + H_diff[permute], H_syn], dim=1)
-    #H_preds_syn = torch.stack([H_real_, H_syn], dim=1)
-    #sample_pred_real = model.decode(H_preds_real)
-    #sample_pred_syn = model_ema.decode(H_preds_syn)
-    #sample_pred = torch.cat([sample_pred_real, sample_pred_syn], dim=1)
+    sample_pred = model.decode(Hs)
 
-    sample_diff = sample_real.unsqueeze(1) - sample_pred[:, 0:3]
+    sample_diff = sample_real.unsqueeze(1) - sample_pred[:, 0:1]
     losses['recon'] = torch.mean(sample_diff ** 2) 
     losses['recon_H'] = torch.mean(H_diff ** 2) 
     #losses['recon'] = torch.mean(torch.sum(sample_diff ** 2, [1, 2, 3]))
@@ -48,9 +43,12 @@ def compute_loss(sample_real, sample_syn, label, model, model_ema, losses, rand_
     #label = torch.cat([label, label], 0)
     #losses['perception'] = perceptual_loss(sample_pred[:,0], sample_pred[:,1])
     losses['cls'] = classifier_criterion(logits, label)
-    return sample_pred[:,0], sample_pred[:,1], sample_pred[:, 2], sample_pred[:, 3]
 
-def train_epoch(config, loader, dataset, image_syn, model, model_ema, perceptual_loss, optimizer, epoch, output_dir, device, rank):
+    sample_syn = sample_pred[:, 2]
+    H_syn_update, _ = model.encode(sample_syn, feat_syn, rand_idx)
+    return sample_pred[:,0], sample_pred[:,1], sample_pred[:, 2], H_syn_update
+
+def train_epoch(config, loader, dataset, image_syn, feat_syn, model, model_ema, perceptual_loss, optimizer, epoch, output_dir, device, rank):
     time_meters = exp_utils.AverageMeters()
     loss_meters = exp_utils.AverageMeters()
 
@@ -72,23 +70,24 @@ def train_epoch(config, loader, dataset, image_syn, model, model_ema, perceptual
         rand_idx = torch.randint(0, ipc, (1,)).item()
 
         sample_real, label = batch[0].to(device), batch[1].to(device)
-        sample_syn = image_syn.val[label, rand_idx]
+        feat_syn_val = feat_syn.val[:, rand_idx]
 
         time_meters.add_loss_value('Data time', time.time() - batch_end)
         end = time.time()
 
         # compute reconstruction & classification loss
         losses = {}
-        out_real, out_real2, out_real3, out_syn = compute_loss(sample_real, sample_syn, label, model, model_ema, losses, rand_idx, perceptual_loss)
-        image_syn.update(out_syn.detach(), label, rand_idx)
+        out_real, out_real2, sample_syn, feat_syn_update = compute_loss(sample_real, feat_syn_val, label, model, model_ema, losses, rand_idx, perceptual_loss)
         time_meters.add_loss_value('Reconstruction time', time.time() - end)
         end = time.time()
-
-        total_loss = losses['recon'] + losses['cls'] + losses['recon_H']#+ losses['perception'] 
+    
+        total_loss = losses['recon'] + losses['cls'] #+ losses['recon_H']#+ losses['perception'] 
         total_loss.backward()
         optimizer.step()
         optimizer.zero_grad()
         model_ema.update(model)
+        image_syn.update(sample_syn.detach(), label, rand_idx)
+        feat_syn.update(feat_syn_update.detach(), label, rand_idx)
 
         for k, v in losses.items():
             if v is not None:
@@ -112,8 +111,8 @@ def train_epoch(config, loader, dataset, image_syn, model, model_ema, perceptual
 
             logger.info(msg)
             if config.vis_recon:
-                outs = [sample_real, sample_syn, out_real, out_real2, out_real3, out_syn]
-                fig, axes = plt.subplots(6, 32, figsize=(5, 5))
+                outs = [sample_real, sample_syn, out_real, out_real2]
+                fig, axes = plt.subplots(4, 32, figsize=(5, 5))
                 axes = axes.ravel()
                 for i, out in enumerate(outs):
                     for j in range(32):
@@ -190,6 +189,7 @@ def main():
     model = exp_utils.load_component(config.model, config, encoders = encoders).to(device)
     model_ema = ModelEMA(model, 0.999)
     image_syn = ImageEMA(num_classes, ipc, num_channel, img_size, device)
+    feat_syn = Feat1DEMA(num_classes, ipc, model.feat_dim, device)
     label_syn = torch.tensor([np.ones(ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=device)
 
     # get model for evaluation
@@ -217,6 +217,7 @@ def main():
                     loader=train_loader,
                     dataset=train_data, 
                     image_syn=image_syn,
+                    feat_syn=feat_syn,
                     model=model, 
                     model_ema=model_ema,
                     perceptual_loss = perceptual_loss,

@@ -1,4 +1,4 @@
-exp_name: 'inv_dd_proj_clsimage'
+exp_name: 'inv_dd_proj_feat_nohrecon'
 output_dir: './output/'
 
 # dataset config

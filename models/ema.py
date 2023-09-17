@@ -3,8 +3,16 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+class Feat1DEMA():
+    def __init__(self, num_classes, ipc, num_channel, device, beta=0.999):
+        self.val = torch.randn(size=(num_classes, ipc, num_channel), dtype=torch.float, device=device)
+        self.beta = beta
+
+    def update(self, out, label, label_2nd = None):
+        self.val[label, label_2nd] = self.beta * self.val[label, label_2nd] + (1 - self.beta) * out
+
 class ImageEMA():
-    def __init__(self, num_classes, ipc, num_channel, img_size, device, beta=0.999):
+    def __init__(self, num_classes, ipc, num_channel, img_size, device, beta=0.):
         self.val = torch.randn(size=(num_classes, ipc, num_channel, img_size, img_size), dtype=torch.float, device=device)
         self.beta = beta
 

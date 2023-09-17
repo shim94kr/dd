@@ -49,13 +49,13 @@ class ResNetEncoder(nn.Module):
         self.last_dim = chs[n_blocks]
 
     def embed (self, x):
-        f = self.init_conv(x)
+        h = self.init_conv(x)
         for phi in self.phi:
-            f = phi(f)
+            h = phi(h)
         
-        f = self.last_layer(f)
-        h = f.mean(dim=[-1, -2])
-        return f, h
+        h = self.last_layer(h)
+        h = h.mean(dim=[-1, -2])
+        return h
 
 
 class ResNetDecoder(nn.Module):
@@ -65,12 +65,6 @@ class ResNetDecoder(nn.Module):
         chs = [ch_base * (2 ** i) for i in range(n_blocks + 1)]
 
         self.bottom_width = bottom_width
-        self.linear = nn.Sequential(
-            nn.Linear(chs[n_blocks], chs[n_blocks]),
-            nn.ReLU(),
-            nn.Linear(chs[n_blocks], chs[n_blocks] * bottom_width * bottom_width)
-        )
-
         self.net = nn.ModuleList(nn.Sequential(
             Block(chs[i+1], chs[i], chs[i],
                     resample='up', activation=act, kernel_size=kernel_size)) for i in range(n_blocks-1, -1, -1)
@@ -82,17 +76,11 @@ class ResNetDecoder(nn.Module):
             nn.Conv2d(chs[0], ch_x, 3, 1, 1)
         )
 
-    def __call__(self, xs, feat_real):
-        
-        n, t = xs.shape[:2]
-        xss = self.linear(xs)
-        xss = xss.reshape(xs.shape[0], xs.shape[1], -1, self.bottom_width, self.bottom_width)
-        xs = xss + xs[:,:,:, None,None]
-        xs = torch.cat([xs[:,0:2], feat_real.unsqueeze(1).detach(), xs[:,2:3]], dim=1)
-        xs = rearrange(xs, 'n t m a b -> (n t) m a b')
-
+    def __call__(self, x):
+        x = repeat(x, 'n c -> n c h w',
+                   h=self.bottom_width, w=self.bottom_width)
         for i in range(len(self.net)):
-            xs = self.net[i](xs)
+            x = self.net[i](x)
 
-        xs = self.net_last(xs)
-        return xs
+        x = self.net_last(x)
+        return x
