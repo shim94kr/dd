@@ -1,4 +1,4 @@
-exp_name: 'inv_dd_rev_logit_h_permute_largebatch'
+exp_name: 'inv_dd_gt_ema_mlp'
 output_dir: './output/'
 
 # dataset config
@@ -11,7 +11,7 @@ dataset:
   num_channel: 3
 
 model:
-  dim_m: 128
+  dim_m: 512
   dim_a: 4
 
 train:

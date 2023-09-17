@@ -1,5 +1,5 @@
 
-exp_name: 'inv_dd_rev_noInvH'
+exp_name: 'inv_dd_proj_ema_detach'
 output_dir: './output/'
 
 # dataset config

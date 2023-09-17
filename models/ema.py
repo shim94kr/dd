@@ -14,13 +14,18 @@ class ImageEMA():
 
 class ModelEMA(torch.nn.Module):
     def __init__(self, init_module, mu):
-        super(ExponentialMovingAverage, self).__init__()
+        super(ModelEMA, self).__init__()
 
         self.module = init_module
         self.mu = mu
 
     def forward(self, x, *args, **kwargs):
         return self.module(x, *args, **kwargs)
+    
+    def encode(self, x, *args, **kwargs):
+        return self.module.encode(x, *args, **kwargs)
+    def decode(self, x, *args, **kwargs):
+        return self.module.decode(x, *args, **kwargs)
 
     def update(self, module, step=None):
         if step is None:

@@ -4,6 +4,7 @@ from torch import nn
 from models.resblock import Block, Conv1d1x1Block
 from einops.layers.torch import Rearrange
 from einops import repeat
+from einops import rearrange
 
 class Conv1d1x1Encoder(nn.Sequential):
     def __init__(self,
@@ -24,6 +25,7 @@ class Conv1d1x1Encoder(nn.Sequential):
 
 class ResNetEncoder(nn.Module):
     def __init__(self,
+                 num_channel,
                  num_classes,
                  k=1,
                  act=nn.ReLU(),
@@ -34,30 +36,26 @@ class ResNetEncoder(nn.Module):
         ch_base = int(32 * k)
         chs = [ch_base * (2 ** i) for i in range(n_blocks + 1)]
 
-        self.phi = nn.Sequential(
-            nn.LazyConv2d(chs[0], 3, 1, 1),
-            *[Block(chs[i], chs[i+1], chs[i+1],
-                    resample='down', activation=act, kernel_size=kernel_size) for i in range(n_blocks)],
+        self.init_conv = nn.Conv2d(num_channel, chs[0], 3, 1, 1)
+        self.phi = nn.ModuleList(
+            [Block(chs[i], chs[i+1], chs[i+1], resample='down', activation=act, kernel_size=kernel_size) for i in range(n_blocks)]
+        ) 
+       
+        self.last_layer = nn.Sequential(
             nn.GroupNorm(min(32, chs[n_blocks]), chs[n_blocks]),
-            act)
-
-        self.linear_cls = nn.LazyLinear(num_classes)
+            act
+        )
+        
+        self.last_dim = chs[n_blocks]
 
     def embed (self, x):
-        h = x
-        h = self.phi(h)
-        h = h.mean(dim=[-1, -2])
-        return h
-
-    def get_logits(self, x):
-        return self.linear_cls(x)
-
-    def __call__(self, x):
-        h = x
-        h = self.phi(h)
-        h = h.reshape(h.shape[0], -1)
-        h = self.linear_cls(h)
-        return h
+        f = self.init_conv(x)
+        for phi in self.phi:
+            f = phi(f)
+        
+        f = self.last_layer(f)
+        h = f.mean(dim=[-1, -2])
+        return f, h
 
 
 class ResNetDecoder(nn.Module):
@@ -67,7 +65,12 @@ class ResNetDecoder(nn.Module):
         chs = [ch_base * (2 ** i) for i in range(n_blocks + 1)]
 
         self.bottom_width = bottom_width
-        self.linear = nn.LazyLinear(chs[n_blocks])
+        self.linear = nn.Sequential(
+            nn.Linear(chs[n_blocks], chs[n_blocks]),
+            nn.ReLU(),
+            nn.Linear(chs[n_blocks], chs[n_blocks] * bottom_width * bottom_width)
+        )
+
         self.net = nn.ModuleList(nn.Sequential(
             Block(chs[i+1], chs[i], chs[i],
                     resample='up', activation=act, kernel_size=kernel_size)) for i in range(n_blocks-1, -1, -1)
@@ -79,13 +82,17 @@ class ResNetDecoder(nn.Module):
             nn.Conv2d(chs[0], ch_x, 3, 1, 1)
         )
 
-    def __call__(self, x):
-        x = self.linear(x)
-        x = repeat(x, 'n c -> n c h w',
-                   h=self.bottom_width, w=self.bottom_width)
+    def __call__(self, xs, feat_real):
+        
+        n, t = xs.shape[:2]
+        xss = self.linear(xs)
+        xss = xss.reshape(xs.shape[0], xs.shape[1], -1, self.bottom_width, self.bottom_width)
+        xs = xss + xs[:,:,:, None,None]
+        xs = torch.cat([xs[:,0:2], feat_real.unsqueeze(1).detach(), xs[:,2:3]], dim=1)
+        xs = rearrange(xs, 'n t m a b -> (n t) m a b')
 
         for i in range(len(self.net)):
-            x = self.net[i](x)
+            xs = self.net[i](xs)
 
-        x = self.net_last(x)
-        return x
+        xs = self.net_last(xs)
+        return xs
