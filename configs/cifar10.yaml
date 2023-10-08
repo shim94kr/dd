@@ -1,14 +1,19 @@
-exp_name: 'inv_dd_proj_clsimage'
+exp_name: 'base'
 output_dir: './output/'
 
-# dataset config
+model:
+  feat_dim: 2048
+  encoders: ['BaseEnc']
+  decoder: StyleGAN2
+
 dataset:
-  fn: './datasets/cifar10.py'
+  fn: './src/datasets/cifar10.py'
   name: 'CIFAR10'
   mean: [0.4914, 0.4822, 0.4465]
   std: [0.2470, 0.2435, 0.2616]
   num_classes: 10
   num_channel: 3
+
 
 train:
   adjust_iter_num: [40000]

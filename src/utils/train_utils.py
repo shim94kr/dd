@@ -1,5 +1,6 @@
 import os
 import torch
+from distutils.dir_util import copy_tree
 
 def adjust_lr(config, optimizer, iter_num, adjust_iter_num):
     if iter_num == adjust_iter_num[0]:

@@ -13,6 +13,9 @@ config.seed = 0
 config.print_freq = 100
 config.vis_image_syn = True
 config.vis_recon = True
+config.entity = "shim94kr"
+config.save_code = True
+config.use_pretrained = False
 
 # dataset config
 config.dataset = edict()
@@ -25,28 +28,14 @@ config.dataset.num_classes = 10
 config.dataset.num_channel = 1
 config.dataset.ipc = 1
 
-# augmentation config
-config.augment = edict()
-config.augment.strategy = 'crop_scale_rotate'
-config.augment.scale = 0.2
-config.augment.crop = 4
-config.augment.rotate = 45
-config.augment.noise = 0.001
-
-# pretrain config
-config.pretrain = edict()
-config.pretrain.encoders = []#['MLP']
-config.pretrain.batch_size = [256]
-config.pretrain.lr = [0.01]
-config.pretrain.epoch = [100]
-
 # model config
 config.model = edict()
-config.model.fn = './models/seqae.py'
+config.model.fn = './src/models/seqae.py'
 config.model.name = 'SeqAELSTSQ'
+config.model.encoders = ['ConvNet'] #BaseEnc
+config.model.decoder = 'ConvNet_Decoder' #BaseDec, StyleGAN2
 config.model.feat_dim = 512
 config.model.k = 2.
-config.model.predictive = True
 config.model.alignment = False
 config.model.change_of_basis = False
 
@@ -57,11 +46,27 @@ config.train.lr = 0.0003
 config.train.lr_decay = 3.0
 config.train.total_iteration = 1000000
 config.train.adjust_iter_num = []
+config.train.rbf_gamma = 1.8
+config.train.rbf_scale = 4.0
+
+# pretrain config
+config.pretrain = edict()
+config.pretrain.batch_size = [256]
+config.pretrain.lr = [0.01]
+config.pretrain.epoch = [100]
+
+# augmentation config
+config.augment = edict()
+config.augment.strategy = 'crop_scale_rotate'
+config.augment.scale = 0.2
+config.augment.crop = 4
+config.augment.rotate = 45
+config.augment.noise = 0.001
 
 # evaluation config
 config.eval = edict()
 config.eval.num = 5
-config.eval.mode = 'A'
+config.eval.mode = 'CIFAR'
 config.eval.batch_size = 256
 config.eval.lr = 0.01
 config.eval.epoch = 1000

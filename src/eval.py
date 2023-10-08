@@ -5,6 +5,8 @@ from utils import data_utils
 import numpy as np
 import torch
 import torch.nn as nn
+from ema_pytorch import EMA
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +50,28 @@ def eval_synthetic_set(config, eval_iter, net, train_loader, test_loader, device
     lr_schedule = [epoch//2+1]
     optimizer = torch.optim.SGD(net.parameters(), lr=lr, momentum=0.9, weight_decay=0.0005)
     criterion = nn.CrossEntropyLoss().to(device)
+    
+    sched1 = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=0.0000001, end_factor=1.0, total_iters=epoch//2)
+    sched2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epoch//2)
+    sched = sched1
+
+    ema = EMA(net, beta=0.995, power=1, update_after_step=0, update_every=1)
 
     start = time.time()
     for ep in range(epoch):
         train_loss, train_acc = eval_epoch(config, 'train', train_loader, net, optimizer, criterion, aug = True, device=device)
+        '''
         if ep in lr_schedule:
             lr *= 0.1
             optimizer = torch.optim.SGD(net.parameters(), lr=lr, momentum=0.9, weight_decay=0.0005)
+        '''
+        ema.update()
+        sched.step()
+        if ep == epoch // 2:
+            sched = sched2
 
     train_time = time.time() - start
-    test_loss, test_acc = eval_epoch(config, 'test', test_loader, net, optimizer, criterion, aug = False, device=device)
+    test_loss, test_acc = eval_epoch(config, 'test', test_loader, ema, optimizer, criterion, aug = False, device=device)
 
     msg = 'Evaluate_{0}: train time = {1:.2f}, train_loss = {train_loss:.4f}, train_acc = {train_acc:.4f}, test_acc = {test_acc:.4f}'.format(
         eval_iter,

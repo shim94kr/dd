@@ -6,3 +6,6 @@ easydict
 einops
 matplotlib
 scikit-learn
+wandb
+rootutils
+ninja

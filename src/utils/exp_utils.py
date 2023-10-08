@@ -1,8 +1,11 @@
 import os
 import sys
 import time
+import shutil
 from pathlib import Path
 import logging
+from distutils import dir_util
+import wandb
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -44,8 +47,11 @@ def load_component(config, config_all, **kwargs):
 
 def create_logger(cfg, cfg_name, phase='train'):
     this_dir = Path(os.path.dirname(__file__))
-    root_dir = (this_dir / '..').resolve()
+    root_dir = (this_dir / '../..').resolve()
     output_dir = (root_dir / cfg.output_dir).resolve()
+    src_dir = (root_dir / 'src').resolve()
+    config_dir = (root_dir / 'configs').resolve()
+
     if not output_dir.exists():
         print('Creating output dir {}'.format(output_dir))
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -55,7 +61,9 @@ def create_logger(cfg, cfg_name, phase='train'):
     exp_name = cfg.exp_name
 
     final_output_dir = output_dir / dataset_name / cfg_name / exp_name
+    final_images_dir = final_output_dir / 'images'
     final_output_dir.mkdir(parents=True, exist_ok=True)
+    final_images_dir.mkdir(parents=True, exist_ok=True)
 
     time_str = time.strftime('%Y-%m-%d-%H-%M')
     log_file = '{}_{}_{}.log'.format(cfg_name, time_str, phase)
@@ -71,5 +79,16 @@ def create_logger(cfg, cfg_name, phase='train'):
     console = logging.StreamHandler()
     logging.getLogger('').addHandler(console)
     #from IPython import embed; embed()
+   
+    output_dir = str(final_output_dir)
+    wandb.init(
+        project = "dd",
+        entity = cfg.entity,
+        name = cfg.exp_name,
+        dir = output_dir
+    )
 
-    return logger, str(final_output_dir)
+    dir_util.copy_tree(src_dir, output_dir + "/src")
+    dir_util.copy_tree(config_dir, output_dir + "/configs")
+    logger.info(f"source copied to {output_dir}/src")
+    return logger, output_dir
